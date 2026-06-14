@@ -3420,7 +3420,12 @@ class _AdminEventsPageState extends State<AdminEventsPage> {
                 width: 110,
                 child: TextField(
                   controller: time,
-                  decoration: const InputDecoration(labelText: 'Hora'),
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Hora',
+                    suffixIcon: Icon(Icons.schedule),
+                  ),
+                  onTap: saving ? null : _pickEventTime,
                 ),
               ),
               SizedBox(
@@ -3511,6 +3516,24 @@ class _AdminEventsPageState extends State<AdminEventsPage> {
         }).toList(),
       ),
     );
+  }
+
+  Future<void> _pickEventTime() async {
+    final parts = time.text.split(':');
+    final initialHour = parts.isNotEmpty ? int.tryParse(parts.first) ?? 18 : 18;
+    final initialMinute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: initialHour.clamp(0, 23),
+        minute: initialMinute.clamp(0, 59),
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      time.text =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    });
   }
 
   Future<void> _createEvent() async {
