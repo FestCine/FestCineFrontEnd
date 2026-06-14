@@ -394,6 +394,8 @@ class _ShellState extends State<Shell> {
         initialSchedule: scheduleCatalog,
         movieOptions: agendaMovieTitles,
         roomOptions: agendaRooms,
+        movies: moviesCatalog,
+        roomCatalog: roomOptions,
         dayOptions: agendaDays,
       ),
       Module.reportes => ReportesPage(edition: selectedEdition),
@@ -402,6 +404,7 @@ class _ShellState extends State<Shell> {
         editionId: selectedEdition.id,
         genres: genreOptions,
         directors: directorOptions,
+        people: people,
         onAdd: _addMovie,
         onDelete: _deleteMovie,
       ),
@@ -2344,6 +2347,7 @@ class AdminMoviesPage extends StatefulWidget {
     required this.editionId,
     required this.genres,
     required this.directors,
+    required this.people,
     required this.onAdd,
     required this.onDelete,
   });
@@ -2352,6 +2356,7 @@ class AdminMoviesPage extends StatefulWidget {
   final String editionId;
   final List<GenreOption> genres;
   final List<DirectorOption> directors;
+  final List<PersonOption> people;
   final ValueChanged<Movie> onAdd;
   final ValueChanged<Movie> onDelete;
 
@@ -2710,7 +2715,7 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
   Future<void> _openDirectorDialog() async {
     final option = await showDialog<DirectorOption>(
       context: context,
-      builder: (context) => const DirectorFormDialog(),
+      builder: (context) => DirectorFormDialog(people: widget.people),
     );
     if (option == null) return;
     setState(() {
@@ -4192,12 +4197,16 @@ class AgendaPage extends StatefulWidget {
     required this.initialSchedule,
     required this.movieOptions,
     required this.roomOptions,
+    required this.movies,
+    required this.roomCatalog,
     required this.dayOptions,
   });
 
   final List<ScreeningPlan> initialSchedule;
   final List<String> movieOptions;
   final List<String> roomOptions;
+  final List<Movie> movies;
+  final List<RoomOption> roomCatalog;
   final List<String> dayOptions;
 
   @override
@@ -4230,6 +4239,8 @@ class _AgendaPageState extends State<AgendaPage> {
     if (oldWidget.initialSchedule != widget.initialSchedule ||
         oldWidget.movieOptions != widget.movieOptions ||
         oldWidget.roomOptions != widget.roomOptions ||
+        oldWidget.movies != widget.movies ||
+        oldWidget.roomCatalog != widget.roomCatalog ||
         oldWidget.dayOptions != widget.dayOptions) {
       _syncOptionsFromWidget();
     }
@@ -4425,8 +4436,12 @@ class _AgendaPageState extends State<AgendaPage> {
       duration,
       qa,
       idProyeccion: nextProjectionId(schedule),
-      idSala: idSalaForRoom(room, schedule),
-      idPeliculaEdicion: idPeliculaEdicionForMovie(movie, schedule),
+      idSala: idSalaForRoom(room, schedule, widget.roomCatalog),
+      idPeliculaEdicion: idPeliculaEdicionForMovie(
+        movie,
+        schedule,
+        widget.movies,
+      ),
     );
 
     setState(() {
@@ -4458,8 +4473,24 @@ class _AgendaPageState extends State<AgendaPage> {
 
   void _syncOptionsFromWidget() {
     schedule = [...widget.initialSchedule];
-    movieOptions = widget.movieOptions.isEmpty ? [...movieTitles] : widget.movieOptions;
-    roomOptions = widget.roomOptions.isEmpty ? [...rooms] : widget.roomOptions;
+    final catalogMovieTitles = widget.movies
+        .map((item) => item.title)
+        .where((title) => title.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final catalogRoomNames = widget.roomCatalog
+        .map((item) => item.name)
+        .where((name) => name.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    movieOptions = catalogMovieTitles.isNotEmpty
+        ? catalogMovieTitles
+        : (widget.movieOptions.isEmpty ? [...movieTitles] : widget.movieOptions);
+    roomOptions = catalogRoomNames.isNotEmpty
+        ? catalogRoomNames
+        : (widget.roomOptions.isEmpty ? [...rooms] : widget.roomOptions);
     dayOptions = widget.dayOptions.isEmpty ? [...festivalDays] : widget.dayOptions;
     movie = movieOptions.contains('La Ultima Luz')
         ? 'La Ultima Luz'
@@ -5724,7 +5755,9 @@ class _GenrePickerDialogState extends State<GenrePickerDialog> {
 }
 
 class DirectorFormDialog extends StatefulWidget {
-  const DirectorFormDialog({super.key});
+  const DirectorFormDialog({super.key, required this.people});
+
+  final List<PersonOption> people;
 
   @override
   State<DirectorFormDialog> createState() => _DirectorFormDialogState();
@@ -5732,15 +5765,91 @@ class DirectorFormDialog extends StatefulWidget {
 
 class _DirectorFormDialogState extends State<DirectorFormDialog> {
   final name = TextEditingController();
+  final phone = TextEditingController();
   final country = TextEditingController(text: 'Bolivia');
   final bio = TextEditingController();
+  PersonOption? selectedPerson;
 
   @override
   void dispose() {
     name.dispose();
+    phone.dispose();
     country.dispose();
     bio.dispose();
     super.dispose();
+  }
+
+  List<PersonOption> _suggestions() {
+    final query = normalizeText(name.text);
+    final phoneQuery = onlyDigits(phone.text);
+    if (query.length < 3 && phoneQuery.length < 3) return const [];
+    final matches = widget.people.where((item) {
+      final candidateName = normalizeText(item.displayName);
+      final candidatePhone = onlyDigits(item.phone);
+      final nameMatches = query.length >= 3 &&
+          (candidateName == query ||
+              candidateName.contains(query) ||
+              query.contains(candidateName) ||
+              fuzzyScore(candidateName, query) >= 0.72);
+      final phoneMatches =
+          phoneQuery.length >= 3 && candidatePhone.contains(phoneQuery);
+      return nameMatches || phoneMatches;
+    }).toList()
+      ..sort((a, b) => a.displayName.compareTo(b.displayName));
+    return matches.take(5).toList();
+  }
+
+  void _fillPerson(PersonOption person) {
+    setState(() {
+      selectedPerson = person;
+      name.text = person.displayName;
+      if (person.phone.trim().isNotEmpty) phone.text = person.phone;
+    });
+  }
+
+  Widget _personMatches() {
+    final matches = _suggestions();
+    if (matches.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          'Personas encontradas',
+          style: TextStyle(
+            color: muted,
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: matches.map((person) {
+            final selected = selectedPerson?.id == person.id;
+            final detail = [
+              person.id,
+              if (person.phone.trim().isNotEmpty) person.phone,
+            ].where((part) => part.trim().isNotEmpty).join(' - ');
+            return ActionChip(
+              avatar: Icon(
+                selected
+                    ? Icons.check_circle_outline
+                    : Icons.person_search_outlined,
+                size: 18,
+              ),
+              label: Text(
+                detail.isEmpty
+                    ? 'Usar ${person.displayName}'
+                    : 'Usar ${person.displayName} ($detail)',
+              ),
+              onPressed: () => _fillPerson(person),
+            );
+          }).toList(),
+        ),
+      ],
+    );
   }
 
   @override
@@ -5756,6 +5865,14 @@ class _DirectorFormDialogState extends State<DirectorFormDialog> {
               controller: name,
               autofocus: true,
               decoration: const InputDecoration(labelText: 'Nombre completo'),
+              onChanged: (_) => setState(() => selectedPerson = null),
+            ),
+            _personMatches(),
+            const SizedBox(height: 10),
+            TextField(
+              controller: phone,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Nro telefono'),
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 10),
@@ -5788,6 +5905,7 @@ class _DirectorFormDialogState extends State<DirectorFormDialog> {
                       toTitleCase(name.text),
                       country: country.text.trim(),
                       biography: bio.text.trim(),
+                      phone: phone.text.trim(),
                     ),
                   ),
           icon: const Icon(Icons.person_add_alt_1_outlined),
@@ -6990,38 +7108,81 @@ class DatabaseGateway {
         staff.any((item) => _readString(item, 'idPersonal') == director.id)) {
       return director.id;
     }
+    if (director.name.isEmpty || director.name == 'Sin director registrado') {
+      return '';
+    }
+
+    final parts = splitFullName(director.name);
+    final directorName = normalizeText('${parts.$1} ${parts.$2}');
+    final directorPhone = onlyDigits(director.phone);
     final peopleById = {
       for (final item in people) _readString(item, 'idPersona'): item,
     };
+
     for (final item in staff) {
       final person =
           peopleById[_readString(item, 'idPersona')] ?? const <String, dynamic>{};
       final fullName =
           '${_readString(person, 'nombre')} ${_readString(person, 'apellido')}'
               .trim();
-      if (normalizeText(fullName) == normalizeText(director.name)) {
+      final sameName = normalizeText(fullName) == directorName;
+      final samePhone = directorPhone.isNotEmpty &&
+          onlyDigits(_readString(person, 'telefono')) == directorPhone;
+      if (sameName || samePhone) {
         return _readString(item, 'idPersonal');
       }
     }
-    if (director.name.isEmpty || director.name == 'Sin director registrado') {
-      return '';
-    }
 
-    final parts = splitFullName(director.name);
-    final person = await _postJson('/api/personas', {
+    Map<String, dynamic>? person;
+    var bestScore = 0;
+    for (final item in people) {
+      final candidateName = normalizeText(
+        '${_readString(item, 'nombre')} ${_readString(item, 'apellido')}',
+      );
+      final candidatePhone = onlyDigits(_readString(item, 'telefono'));
+
+      var score = 0;
+      if (directorName.length >= 3) {
+        if (candidateName == directorName) score += 300;
+        if (candidateName.contains(directorName) ||
+            directorName.contains(candidateName)) {
+          score += 200;
+        }
+        if (fuzzyScore(candidateName, directorName) >= 0.72) score += 120;
+      }
+      if (directorPhone.isNotEmpty && candidatePhone == directorPhone) {
+        score += 90;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        person = item;
+      }
+    }
+    if (bestScore == 0) person = null;
+
+    person ??= await _postJson('/api/personas', {
       'idPersona': nextIdFromMaps(people, 'idPersona', 'PE'),
       'nombre': parts.$1,
       'apellido': parts.$2,
       'correo': '${normalizeText(director.name).replaceAll(' ', '.')}@festcine.local',
-      'telefono': null,
+      'telefono': emptyToNull(director.phone),
     });
+
+    final personId = _readString(person, 'idPersona');
+    for (final item in staff) {
+      if (_readString(item, 'idPersona') == personId) {
+        return _readString(item, 'idPersonal');
+      }
+    }
+
     final staffId = nextIdFromMaps(staff, 'idPersonal', 'PC');
     await _postJson('/api/personal-cinematografico', {
       'idPersonal': staffId,
       'biografia': emptyToNull(director.biography) ??
           'Director registrado desde Gestion de Peliculas.',
       'pais': emptyToNull(director.country),
-      'idPersona': _readString(person, 'idPersona'),
+      'idPersona': personId,
     });
     return staffId;
   }
@@ -7613,6 +7774,7 @@ List<DirectorOption> directorsFromStaff(
         name,
         country: _readString(entry.value, 'pais'),
         biography: _readString(entry.value, 'biografia'),
+        phone: _readString(person, 'telefono'),
       ),
     );
   }
@@ -7677,14 +7839,32 @@ String nextProjectionId(List<ScreeningPlan> schedule) {
   return 'PR${next.toString().padLeft(3, '0')}';
 }
 
-String idSalaForRoom(String room, List<ScreeningPlan> schedule) {
+String idSalaForRoom(
+  String room,
+  List<ScreeningPlan> schedule, [
+  List<RoomOption> roomCatalog = const [],
+]) {
+  for (final item in roomCatalog) {
+    if ((item.name == room || item.label == room) && item.id.isNotEmpty) {
+      return item.id;
+    }
+  }
   for (final item in schedule) {
     if (item.room == room && item.idSala.isNotEmpty) return item.idSala;
   }
   return fallbackRoomIds[room] ?? '';
 }
 
-String idPeliculaEdicionForMovie(String movie, List<ScreeningPlan> schedule) {
+String idPeliculaEdicionForMovie(
+  String movie,
+  List<ScreeningPlan> schedule, [
+  List<Movie> movies = const [],
+]) {
+  for (final item in movies) {
+    if (item.title == movie && item.idPeliculaEdicion.isNotEmpty) {
+      return item.idPeliculaEdicion;
+    }
+  }
   for (final item in schedule) {
     if (item.movie == movie && item.idPeliculaEdicion.isNotEmpty) {
       return item.idPeliculaEdicion;
@@ -8337,12 +8517,14 @@ class DirectorOption {
     this.name, {
     this.country = '',
     this.biography = '',
+    this.phone = '',
   });
 
   final String id;
   final String name;
   final String country;
   final String biography;
+  final String phone;
 
   bool get isLocal => id.startsWith('NEW_') || id.isEmpty;
 }
