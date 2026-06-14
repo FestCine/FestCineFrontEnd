@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.cache/
+.vite/
+.turbo/
+coverage/
+.DS_Store
+.env
+.env.local
+.idea/
+.vscode/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Ignore local OS files
+Thumbs.db
+desktop.ininode_modules
