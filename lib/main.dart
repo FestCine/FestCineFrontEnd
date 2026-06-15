@@ -1925,8 +1925,10 @@ class _TaquillaPageState extends State<TaquillaPage> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GenericQr(label: receipt!.codigoEntrada),
-                const SizedBox(width: 12),
+                if (normalizeText(receipt!.metodoPago) == 'qr') ...[
+                  GenericQr(label: receipt!.codigoEntrada),
+                  const SizedBox(width: 12),
+                ],
                 Expanded(
                   child: Text(
                     'Codigo: ${receipt!.codigoEntrada}\nFactura: ${receipt!.idFactura}\nMetodo de pago: ${receipt!.metodoPago}',
@@ -3019,10 +3021,13 @@ class _EventTicketPageState extends State<EventTicketPage> {
         ],
         _centeredPanel(
           CardBox(
-            title: 'Entrada para evento',
-            subtitle: 'Selecciona un evento y registra a la persona',
+            title: receipt == null ? 'Entrada para evento' : 'Venta confirmada',
+            subtitle: receipt == null
+                ? 'Selecciona un evento y registra a la persona'
+                : 'Operacion registrada correctamente',
             accent: gold,
-            child: Column(
+            child: receipt == null
+                ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 DropdownButtonFormField<String>(
@@ -3132,16 +3137,93 @@ class _EventTicketPageState extends State<EventTicketPage> {
                       : const Icon(Icons.event_available_outlined),
                   label: Text(saving ? 'Vendiendo evento...' : 'Confirmar entrada de evento'),
                 ),
-                if (receipt != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    'Factura ${receipt!.idFactura} - Codigo ${receipt!.codigoEntrada} - ${receipt!.metodoPago}',
-                    style: const TextStyle(color: green, fontWeight: FontWeight.w800),
-                  ),
-                ],
               ],
-            ),
+            )
+                : _eventReceipt(current),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _eventReceipt(FestivalEvent? current) {
+    final currentReceipt = receipt;
+    if (currentReceipt == null) return const SizedBox.shrink();
+    final eventName = current?.name ?? event?.name ?? 'Evento';
+    final eventDetail = current == null
+        ? 'Entrada de evento'
+        : '${current.type} - ${current.room} - ${current.dateLabel} ${current.timeLabel}';
+    final attendeeName = attendee?.displayName ??
+        selectedPerson?.displayName ??
+        '${firstName.text.trim()} ${lastName.text.trim()}'.trim();
+    final paidWithQr = normalizeText(currentReceipt.metodoPago) == 'qr';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.check_circle, color: green, size: 54),
+        const SizedBox(height: 12),
+        Text(
+          eventName,
+          style: const TextStyle(
+            color: text,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(eventDetail, style: const TextStyle(color: muted)),
+        const SizedBox(height: 14),
+        Text(
+          'Persona: ${attendeeName.isEmpty ? "No registrada" : attendeeName}',
+          style: const TextStyle(color: text),
+        ),
+        Text(
+          'Pago: ${currentReceipt.metodoPago} - NIT/CI: ${nit.text.trim().isEmpty ? "S/N" : nit.text.trim()}',
+          style: const TextStyle(color: text),
+        ),
+        Text(
+          'Total: Bs ${currentReceipt.montoPagado.toStringAsFixed(2)}',
+          style: const TextStyle(
+            color: gold,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (paidWithQr) ...[
+              GenericQr(label: currentReceipt.codigoEntrada),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Text(
+                'Codigo: ${currentReceipt.codigoEntrada}\nFactura: ${currentReceipt.idFactura}\nMetodo de pago: ${currentReceipt.metodoPago}',
+                style: const TextStyle(color: muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Compra procesada correctamente y validada contra aforo disponible.',
+          style: TextStyle(color: green, fontSize: 12),
+        ),
+        const SizedBox(height: 18),
+        OutlinedButton.icon(
+          onPressed: () => setState(() {
+            receipt = null;
+            message = null;
+            attendee = null;
+            selectedPerson = null;
+            firstName.clear();
+            lastName.clear();
+            email.clear();
+            phone.clear();
+            nit.clear();
+          }),
+          icon: const Icon(Icons.add),
+          label: const Text('Nueva venta'),
         ),
       ],
     );
@@ -3362,7 +3444,9 @@ class _EventTicketPageState extends State<EventTicketPage> {
       setState(() {
         saving = false;
         messageIsError = false;
-        message = 'Entrada de evento vendida correctamente.';
+        message = null;
+        attendee = resolved.attendee;
+        event = selectedEvent;
         receipt = response;
       });
     } on DatabaseException catch (error) {
