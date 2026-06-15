@@ -1797,29 +1797,44 @@ class _TaquillaPageState extends State<TaquillaPage> {
     return SizedBox(
       width: 520,
       child: DropdownButtonFormField<String>(
-        initialValue: selectedExists ? selectedAccreditedPassId : null,
+        key: ValueKey('owned-pass-${selectedAccreditedPassId ?? "none"}'),
+        initialValue: selectedExists ? selectedAccreditedPassId : '',
         isExpanded: true,
         decoration: InputDecoration(
           labelText: 'Abono disponible',
           helperText: selectedPass != null && !selectedPass.allowed
               ? 'Este abono no es valido para esta proyeccion.'
-              : 'Se valida contra AbonoProyeccion de la proyeccion seleccionada',
+              : 'Puedes comprar sin usar abono o seleccionar uno permitido.',
           helperStyle: TextStyle(
             color: selectedPass != null && !selectedPass.allowed ? red : muted,
           ),
           border: const OutlineInputBorder(),
         ),
-        items: accreditedPasses.map((pass) {
-          return DropdownMenuItem(
-            value: pass.id,
-            child: Text(
-              '${pass.label} - ${pass.allowed ? "permitido" : "no permitido"}',
-            ),
-          );
-        }).toList(),
+        items: [
+          const DropdownMenuItem(
+            value: '',
+            child: Text('Sin abono - comprar entrada individual'),
+          ),
+          ...accreditedPasses.map((pass) {
+            return DropdownMenuItem(
+              value: pass.id,
+              child: Text(
+                '${pass.label} - ${pass.allowed ? "permitido" : "no permitido"}',
+              ),
+            );
+          }),
+        ],
         onChanged: purchasing
             ? null
             : (value) {
+                if (value == null || value.isEmpty) {
+                  setState(() {
+                    selectedAccreditedPassId = null;
+                    message = null;
+                    purchaseError = false;
+                  });
+                  return;
+                }
                 final pass = accreditedPasses.firstWhere(
                   (item) => item.id == value,
                   orElse: () => const OwnedPass.empty(),
@@ -2142,11 +2157,13 @@ class _TaquillaPageState extends State<TaquillaPage> {
       if (!mounted) return;
       setState(() {
         accreditedPasses = passes;
-        selectedAccreditedPassId = passes.length == 1
-            ? passes.first.id
-            : (passes.any((pass) => pass.id == selectedAccreditedPassId)
-                ? selectedAccreditedPassId
-                : null);
+        final currentPassStillExists =
+            passes.any((pass) => pass.id == selectedAccreditedPassId);
+        if (!currentPassStillExists) {
+          final allowedPasses = passes.where((pass) => pass.allowed).toList();
+          selectedAccreditedPassId =
+              allowedPasses.length == 1 ? allowedPasses.first.id : null;
+        }
         loadingAccreditedPasses = false;
       });
     } on DatabaseException catch (error) {
@@ -2937,6 +2954,7 @@ class EventTicketPage extends StatefulWidget {
 class _EventTicketPageState extends State<EventTicketPage> {
   FestivalEvent? event;
   Attendee? attendee;
+  PersonOption? selectedPerson;
   final firstName = TextEditingController();
   final lastName = TextEditingController();
   final email = TextEditingController();
@@ -3046,6 +3064,7 @@ class _EventTicketPageState extends State<EventTicketPage> {
                       width: 220,
                       child: TextField(
                         controller: firstName,
+                        onChanged: (_) => _markPersonDirty(),
                         decoration: const InputDecoration(labelText: 'Nombre persona'),
                       ),
                     ),
@@ -3053,6 +3072,7 @@ class _EventTicketPageState extends State<EventTicketPage> {
                       width: 220,
                       child: TextField(
                         controller: lastName,
+                        onChanged: (_) => _markPersonDirty(),
                         decoration: const InputDecoration(labelText: 'Apellido persona'),
                       ),
                     ),
@@ -3060,6 +3080,7 @@ class _EventTicketPageState extends State<EventTicketPage> {
                       width: 260,
                       child: TextField(
                         controller: email,
+                        onChanged: (_) => _markPersonDirty(),
                         decoration: const InputDecoration(labelText: 'Correo'),
                       ),
                     ),
@@ -3067,9 +3088,11 @@ class _EventTicketPageState extends State<EventTicketPage> {
                       width: 180,
                       child: TextField(
                         controller: phone,
+                        onChanged: (_) => _markPersonDirty(),
                         decoration: const InputDecoration(labelText: 'Telefono'),
                       ),
                     ),
+                    _personMatches(),
                     SizedBox(
                       width: 220,
                       child: DropdownButtonFormField<String>(
@@ -3096,7 +3119,10 @@ class _EventTicketPageState extends State<EventTicketPage> {
                 ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
-                  onPressed: saving || current == null ? null : _confirm,
+                  onPressed:
+                      saving || current == null || !_personFormValid
+                          ? null
+                          : _confirm,
                   icon: saving
                       ? const SizedBox(
                           width: 18,
@@ -3138,6 +3164,159 @@ class _EventTicketPageState extends State<EventTicketPage> {
     lastName.text = item.lastName;
     email.text = item.email;
     phone.text = item.phone;
+    selectedPerson = item.idPersona.isEmpty
+        ? null
+        : PersonOption.fromAttendee(item);
+  }
+
+  Widget _personMatches() {
+    final suggestions = _personSuggestions().take(5).toList();
+    if (suggestions.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      width: 520,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Text(
+            'Coincidencias encontradas',
+            style: TextStyle(color: text, fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          ...suggestions.map((item) {
+            final person = item.person;
+            final selected = selectedPerson?.id == person.id;
+            final details = [
+              person.id,
+              if (person.email.trim().isNotEmpty) person.email,
+            ].where((part) => part.trim().isNotEmpty).join(' - ');
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: OutlinedButton.icon(
+                onPressed: saving ? null : () => _fillPersonMatch(item),
+                icon: Icon(
+                  selected
+                      ? Icons.check_circle_outline
+                      : Icons.person_search_outlined,
+                ),
+                label: Text(
+                  details.isEmpty
+                      ? 'Usar ${person.displayName}'
+                      : 'Usar ${person.displayName} ($details)',
+                ),
+              ),
+            );
+          }),
+          if (selectedPerson != null)
+            Text(
+              'Coincidencia detectada: ${selectedPerson!.displayName} (${selectedPerson!.id})',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: muted, fontSize: 12),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _markPersonDirty() {
+    final suggestions = _personSuggestions();
+    final match = suggestions.isEmpty ? null : suggestions.first;
+    setState(() {
+      selectedPerson = match?.person;
+      attendee = match?.attendee;
+    });
+  }
+
+  List<PersonMatch> _personSuggestions() {
+    final fullName = normalizeText('${firstName.text} ${lastName.text}');
+    final emailQuery = email.text.trim().toLowerCase();
+    final phoneQuery = onlyDigits(phone.text);
+    if (fullName.length < 3 && emailQuery.length < 3 && phoneQuery.length < 3) {
+      return const [];
+    }
+
+    final sourcePeople = widget.people.isEmpty
+        ? widget.attendees.map((item) => PersonOption.fromAttendee(item)).toList()
+        : widget.people;
+    final matches = sourcePeople
+        .where(
+          (person) =>
+              _personMatchScore(person, fullName, emailQuery, phoneQuery) > 0,
+        )
+        .map((person) => PersonMatch(person, _attendeeForPerson(person)))
+        .toList()
+      ..sort((a, b) {
+        final score = _personMatchScore(
+          b.person,
+          fullName,
+          emailQuery,
+          phoneQuery,
+        ).compareTo(
+          _personMatchScore(a.person, fullName, emailQuery, phoneQuery),
+        );
+        if (score != 0) return score;
+        return a.person.displayName.compareTo(b.person.displayName);
+      });
+    return matches;
+  }
+
+  int _personMatchScore(
+    PersonOption person,
+    String fullName,
+    String emailQuery,
+    String phoneQuery,
+  ) {
+    var score = 0;
+    final candidateName = normalizeText(
+      '${person.firstName} ${person.lastName} ${person.displayName}',
+    );
+    final candidateEmail = person.email.toLowerCase();
+    final candidatePhone = onlyDigits(person.phone);
+
+    if (fullName.length >= 3) {
+      if (candidateName == fullName) score += 120;
+      if (candidateName.contains(fullName) || fullName.contains(candidateName)) {
+        score += 100;
+      }
+      if (fuzzyScore(candidateName, fullName) >= 0.72) score += 80;
+    }
+    if (emailQuery.isNotEmpty && candidateEmail == emailQuery) score += 60;
+    if (phoneQuery.isNotEmpty && candidatePhone == phoneQuery) score += 50;
+    return score;
+  }
+
+  Attendee? _attendeeForPerson(PersonOption person) {
+    final personId = person.id;
+    final emailQuery = person.email.toLowerCase();
+    final phoneQuery = onlyDigits(person.phone);
+    final fullName = normalizeText(person.displayName);
+    for (final item in widget.attendees) {
+      final samePersonId = personId.isNotEmpty && item.idPersona == personId;
+      final sameEmail =
+          emailQuery.isNotEmpty && item.email.toLowerCase() == emailQuery;
+      final samePhone =
+          phoneQuery.isNotEmpty && onlyDigits(item.phone) == phoneQuery;
+      final sameName = fullName.isNotEmpty &&
+          normalizeText('${item.firstName} ${item.lastName} ${item.name}') ==
+              fullName;
+      if (samePersonId || sameEmail || samePhone || sameName) return item;
+    }
+    return null;
+  }
+
+  bool get _personFormValid =>
+      firstName.text.trim().isNotEmpty && lastName.text.trim().isNotEmpty;
+
+  void _fillPersonMatch(PersonMatch match) {
+    firstName.text = match.person.firstName.isEmpty
+        ? match.person.displayName
+        : match.person.firstName;
+    lastName.text = match.person.lastName;
+    email.text = match.person.email;
+    phone.text = match.person.phone;
+    setState(() {
+      selectedPerson = match.person;
+      attendee = match.attendee;
+    });
   }
 
   FestivalEvent? _preferredEvent(List<FestivalEvent> items) {
@@ -3165,7 +3344,7 @@ class _EventTicketPageState extends State<EventTicketPage> {
       final resolved = await DatabaseGateway.resolveAttendee(
         widget.edition.id,
         AttendeeFormData(
-          idPersona: attendee?.idPersona ?? '',
+          idPersona: selectedPerson?.id ?? attendee?.idPersona ?? '',
           firstName: firstName.text.trim(),
           lastName: lastName.text.trim(),
           email: email.text.trim(),
