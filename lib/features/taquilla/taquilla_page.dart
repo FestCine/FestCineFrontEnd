@@ -548,7 +548,7 @@ class _TaquillaPageState extends State<TaquillaPage> {
 
         children: movie!.sessions.map((s) {
 
-          final capacity = s.capacity == 0 ? roomCapacity(s.room) : s.capacity;
+          final capacity = _sessionCapacity(s);
 
           final pct = ((s.occupied.length / capacity) * 100).round();
 
@@ -602,6 +602,9 @@ class _TaquillaPageState extends State<TaquillaPage> {
 
   );
 
+  int _sessionCapacity(Session value) =>
+      value.capacity <= 0 ? roomCapacity(value.room) : value.capacity;
+
 
 
   Widget _seats() => _centeredPanel(
@@ -636,6 +639,8 @@ class _TaquillaPageState extends State<TaquillaPage> {
 
               SeatMap(
 
+                capacity: _sessionCapacity(session!),
+
                 occupied: session!.occupied,
 
                 selected: selectedSeats,
@@ -646,7 +651,8 @@ class _TaquillaPageState extends State<TaquillaPage> {
 
                     selectedSeats.remove(id);
 
-                  } else if (!session!.occupied.contains(id)) {
+                  } else if (!session!.occupied.contains(id) &&
+                      seatLabelToNumber(id) <= _sessionCapacity(session!)) {
 
                     selectedSeats.clear();
 

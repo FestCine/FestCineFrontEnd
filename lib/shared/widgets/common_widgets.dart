@@ -6,6 +6,8 @@ class SeatMap extends StatelessWidget {
 
     super.key,
 
+    required this.capacity,
+
     required this.occupied,
 
     required this.selected,
@@ -15,6 +17,8 @@ class SeatMap extends StatelessWidget {
   });
 
 
+
+  final int capacity;
 
   final List<String> occupied;
 
@@ -28,7 +32,11 @@ class SeatMap extends StatelessWidget {
 
   Widget build(BuildContext context) {
 
-    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    final seatCount = capacity <= 0 ? 120 : capacity;
+    final rows = List.generate(
+      (seatCount / 12).ceil(),
+      (index) => String.fromCharCode('A'.codeUnitAt(0) + index),
+    );
 
     return Column(
 
@@ -53,6 +61,10 @@ class SeatMap extends StatelessWidget {
           child: Column(
 
             children: rows.map((row) {
+              final rowIndex = row.codeUnitAt(0) - 'A'.codeUnitAt(0);
+              final firstSeatNumber = rowIndex * 12 + 1;
+              final seatsInRow =
+                  (seatCount - firstSeatNumber + 1).clamp(0, 12).toInt();
 
               return Padding(
 
@@ -70,7 +82,7 @@ class SeatMap extends StatelessWidget {
 
                     ),
 
-                    ...List.generate(12, (i) {
+                    ...List.generate(seatsInRow, (i) {
 
                       final id = '$row${i + 1}';
 

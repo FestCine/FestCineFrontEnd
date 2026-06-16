@@ -342,27 +342,49 @@ class _ReportesPageState extends State<ReportesPage> {
 
       final total = items.fold<double>(0, (sum, item) => sum + item.totalRecaudado);
 
+      final salesByType = _groupFinance(
+        items,
+        _saleTypeLabel,
+        preferredOrder: const ['Entrada Individual', 'Abono'],
+      );
+      final tariffsByType = _groupFinance(
+        items.where((item) => _tariffLabel(item).isNotEmpty),
+        _tariffLabel,
+        preferredOrder: const [
+          'General',
+          'Estudiante',
+          'Jubilado',
+          'Acreditado',
+          'VIP',
+        ],
+      );
+      final detailsBySubtype = _groupFinance(
+        items,
+        (item) {
+          final subtype = item.subtipoVenta.trim().isEmpty
+              ? 'Sin subtipo'
+              : item.subtipoVenta.trim();
+          return '${_saleTypeLabel(item)} / $subtype';
+        },
+      );
+
       final salesCard = CardBox(
 
-        title: 'Recaudacion por venta',
+        title: 'Por tipo de venta',
 
-        subtitle: 'Entradas individuales y abonos desde la base',
+        subtitle: 'Entradas individuales vs. abonos',
 
         accent: slate,
 
         child: Column(
 
-          children: items.take(8).map((item) {
+          children: salesByType.map((item) {
 
-            final percent = total == 0
-
-                ? 0
-
-                : ((item.totalRecaudado / total) * 100).round();
+            final percent = _financePercent(item.totalRecaudado, total);
 
             return ProgressRow(
 
-              '${item.tipoVenta} / ${item.subtipoVenta}',
+              '${item.label} - ${item.cantidadVentas} ventas - Bs ${item.totalRecaudado.toStringAsFixed(2)}',
 
               percent,
 
@@ -370,7 +392,7 @@ class _ReportesPageState extends State<ReportesPage> {
 
                   ? slate
 
-                  : item.tipoVenta.toLowerCase().contains('abono')
+                  : normalizeText(item.label).contains('abono')
 
                   ? purple
 
@@ -396,25 +418,21 @@ class _ReportesPageState extends State<ReportesPage> {
 
         child: Column(
 
-          children: items.take(8).map((f) {
+          children: tariffsByType.map((f) {
 
-            final percent = total == 0
-
-                ? 0
-
-                : ((f.totalRecaudado / total) * 100).round();
+            final percent = _financePercent(f.totalRecaudado, total);
 
             return Tooltip(
 
               message:
 
-                  '${f.tipoTarifa}\nRecaudacion: Bs ${f.totalRecaudado.toStringAsFixed(2)}\nCantidad: ${f.cantidadVentas}',
+                  '${f.label}\nRecaudacion: Bs ${f.totalRecaudado.toStringAsFixed(2)}\nCantidad: ${f.cantidadVentas}',
 
               waitDuration: const Duration(milliseconds: 250),
 
               child: ProgressRow(
 
-                '${f.tipoTarifa} - Bs ${f.totalRecaudado.toStringAsFixed(2)}',
+                '${f.label} - ${f.cantidadVentas} ventas - Bs ${f.totalRecaudado.toStringAsFixed(2)}',
 
                 percent,
 
@@ -466,29 +484,25 @@ class _ReportesPageState extends State<ReportesPage> {
 
           CardBox(
 
-            title: 'Por tipo de venta',
+            title: 'Detalle por subtipo de venta',
 
             subtitle:
 
-                'Consulta: total recaudado separado en entradas individuales y abonos',
+                'Consulta: total recaudado separado por subtipo de venta',
 
             accent: slate,
 
             child: Column(
 
-              children: items
+              children: detailsBySubtype
 
                   .take(10)
 
                   .map((s) => ProgressRow(
 
-                        '${s.tipoVenta} - ${s.cantidadVentas} ventas',
+                        '${s.label} - ${s.cantidadVentas} ventas - Bs ${s.totalRecaudado.toStringAsFixed(2)}',
 
-                        total == 0
-
-                            ? 0
-
-                            : ((s.totalRecaudado / total) * 100).round(),
+                        _financePercent(s.totalRecaudado, total),
 
                         s.totalRecaudado == 0 ? slate : gold,
 
@@ -510,5 +524,63 @@ class _ReportesPageState extends State<ReportesPage> {
 
   );
 
+  List<_FinanceGroup> _groupFinance(
+    Iterable<FinanceItem> items,
+    String Function(FinanceItem item) labelFor, {
+    List<String> preferredOrder = const [],
+  }) {
+    final groups = <String, _FinanceGroup>{};
+    for (final item in items) {
+      final label = labelFor(item).trim();
+      if (label.isEmpty) continue;
+      final current = groups[label];
+      groups[label] = _FinanceGroup(
+        label,
+        (current?.cantidadVentas ?? 0) + item.cantidadVentas,
+        (current?.totalRecaudado ?? 0) + item.totalRecaudado,
+      );
+    }
+    final ordered = groups.values.toList();
+    ordered.sort((a, b) {
+      final aIndex = preferredOrder.indexOf(a.label);
+      final bIndex = preferredOrder.indexOf(b.label);
+      if (aIndex != -1 || bIndex != -1) {
+        if (aIndex == -1) return 1;
+        if (bIndex == -1) return -1;
+        return aIndex.compareTo(bIndex);
+      }
+      return a.label.compareTo(b.label);
+    });
+    return ordered;
+  }
+
+  String _saleTypeLabel(FinanceItem item) {
+    final normalized = normalizeText(item.tipoVenta);
+    return normalized.contains('abono') ? 'Abono' : 'Entrada Individual';
+  }
+
+  String _tariffLabel(FinanceItem item) {
+    final normalized = normalizeText(item.tipoTarifa);
+    return switch (normalized) {
+      'general' => 'General',
+      'estudiante' => 'Estudiante',
+      'jubilado' => 'Jubilado',
+      'acreditado' => 'Acreditado',
+      'vip' => 'VIP',
+      _ => '',
+    };
+  }
+
+  int _financePercent(double amount, double total) =>
+      total == 0 ? 0 : ((amount / total) * 100).round();
+
+}
+
+class _FinanceGroup {
+  const _FinanceGroup(this.label, this.cantidadVentas, this.totalRecaudado);
+
+  final String label;
+  final int cantidadVentas;
+  final double totalRecaudado;
 }
 
