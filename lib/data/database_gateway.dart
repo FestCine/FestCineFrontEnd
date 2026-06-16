@@ -44,7 +44,11 @@ class DatabaseGateway {
 
 
 
-    final moviesData = await _getList('/api/catalogos/peliculas/$selectedEditionId');
+    final rawMoviesData =
+        await _getList('/api/catalogos/peliculas/$selectedEditionId');
+    final moviesData = rawMoviesData
+        .where((item) => _isCarteleraStatus(_readString(item, 'estadoFestival')))
+        .toList();
 
     final projectionsData =
 
@@ -75,6 +79,8 @@ class DatabaseGateway {
     final venuesData = await _getList('/api/sedes');
 
     final allMoviesData = await _getList('/api/peliculas');
+
+    final movieEditionsData = await _getList('/api/pelicula-ediciones');
 
     final movieGenresData = await _getList('/api/relaciones/pelicula-generos');
 
@@ -111,6 +117,16 @@ class DatabaseGateway {
       for (final item in moviesData) _readString(item, 'titulo'): item,
 
     };
+    final movieEditionByMovieId = <String, Map<String, dynamic>>{};
+    for (final item in movieEditionsData) {
+      if (_readString(item, 'idEdicion') != selectedEditionId) continue;
+      final movieId = _readString(item, 'idPelicula');
+      final current = movieEditionByMovieId[movieId];
+      if (current == null ||
+          _isCarteleraStatus(_readString(item, 'estadoFestival'))) {
+        movieEditionByMovieId[movieId] = item;
+      }
+    }
 
     final sessionsByTitle = <String, List<Session>>{};
 
@@ -176,11 +192,9 @@ class DatabaseGateway {
 
       final movieData = moviesByTitle[title];
 
-      final movieEditionId = movieData == null
+      if (movieData == null) continue;
 
-          ? ''
-
-          : _readString(movieData, 'idPeliculaEdicion');
+      final movieEditionId = _readString(movieData, 'idPeliculaEdicion');
 
       final session = Session(
 
@@ -220,7 +234,7 @@ class DatabaseGateway {
 
           session.time,
 
-          movieData == null ? 100 : _readInt(movieData, 'duracion'),
+          _readInt(movieData, 'duracion'),
 
           session.qa,
 
@@ -291,6 +305,8 @@ class DatabaseGateway {
         director: directorsByMovie[_readString(item, 'idPelicula')] ?? 'Sin director registrado',
 
         format: _readString(movieBase, 'formatoProyeccion'),
+
+        status: _readString(item, 'estadoFestival'),
 
       );
 
@@ -378,13 +394,20 @@ class DatabaseGateway {
 
     final movieOptions = allMoviesData.map((item) {
 
+      final movieId = _readString(item, 'idPelicula');
+      final relation = movieEditionByMovieId[movieId];
       return MovieOption(
 
-        _readString(item, 'idPelicula'),
+        movieId,
 
         _readString(item, 'titulo'),
 
         _readInt(item, 'anioProduccion'),
+
+        idPeliculaEdicion:
+            relation == null ? '' : _readString(relation, 'idPeliculaEdicion'),
+
+        status: relation == null ? '' : _readString(relation, 'estadoFestival'),
 
       );
 
@@ -1330,9 +1353,9 @@ class DatabaseGateway {
 
     final movieId = nextIdFromMaps(movies, 'idPelicula', 'PL');
 
-    final movieEditionId =
-
-        nextIdFromMaps(movieEditions, 'idPeliculaEdicion', 'PX');
+    final movieEditionId = draft.addToCartelera
+        ? nextIdFromMaps(movieEditions, 'idPeliculaEdicion', 'PX')
+        : '';
 
 
 
@@ -1358,17 +1381,19 @@ class DatabaseGateway {
 
 
 
-    await _postJson('/api/pelicula-ediciones', {
+    if (draft.addToCartelera) {
+      await _postJson('/api/pelicula-ediciones', {
 
-      'idPeliculaEdicion': movieEditionId,
+        'idPeliculaEdicion': movieEditionId,
 
-      'idPelicula': movieId,
+        'idPelicula': movieId,
 
-      'idEdicion': draft.editionId,
+        'idEdicion': draft.editionId,
 
-      'estadoFestival': 'Postulada',
+        'estadoFestival': 'Seleccionada',
 
-    });
+      });
+    }
 
 
 
@@ -1488,7 +1513,7 @@ class DatabaseGateway {
 
       draft.posterUrl,
 
-      const [Session('Proximamente', '20:00', 'Sala A', true, [])],
+      const [],
 
       idPelicula: movieId,
 
@@ -1498,8 +1523,88 @@ class DatabaseGateway {
 
       format: draft.format,
 
+      status: draft.addToCartelera ? 'Seleccionada' : '',
+
     );
 
+  }
+
+  static Future<String> addExistingMovieToCartelera({
+    required MovieOption movie,
+    required String editionId,
+  }) async {
+    final movieEditions = await _getList('/api/pelicula-ediciones');
+    final existing = movieEditions.firstWhere(
+      (item) =>
+          _readString(item, 'idPelicula') == movie.id &&
+          _readString(item, 'idEdicion') == editionId,
+      orElse: () => const <String, dynamic>{},
+    );
+
+    if (existing.isNotEmpty) {
+      final status = _readString(existing, 'estadoFestival');
+      if (_isCarteleraStatus(status)) {
+        return 'Esta película ya se encuentra en cartelera.';
+      }
+
+      final relationId = _readString(existing, 'idPeliculaEdicion');
+      await _putJson('/api/pelicula-ediciones/$relationId', {
+        'idPeliculaEdicion': relationId,
+        'idPelicula': movie.id,
+        'idEdicion': editionId,
+        'estadoFestival': 'Seleccionada',
+      });
+      return 'Película añadida nuevamente a cartelera.';
+    }
+
+    await _postJson('/api/pelicula-ediciones', {
+      'idPeliculaEdicion':
+          nextIdFromMaps(movieEditions, 'idPeliculaEdicion', 'PX'),
+      'idPelicula': movie.id,
+      'idEdicion': editionId,
+      'estadoFestival': 'Seleccionada',
+    });
+    return 'Película existente añadida a la cartelera de la edición actual.';
+  }
+
+  static Future<void> retireMovieFromCartelera({
+    required Movie movie,
+    required String editionId,
+  }) async {
+    var relationId = movie.idPeliculaEdicion;
+    var movieId = movie.idPelicula;
+    Map<String, dynamic> relation = const <String, dynamic>{};
+
+    if (relationId.isEmpty || movieId.isEmpty) {
+      final movieEditions = await _getList('/api/pelicula-ediciones');
+      relation = movieEditions.firstWhere(
+        (item) {
+          final sameRelation = relationId.isNotEmpty &&
+              _readString(item, 'idPeliculaEdicion') == relationId;
+          final sameMovie = movieId.isNotEmpty &&
+              _readString(item, 'idPelicula') == movieId &&
+              _readString(item, 'idEdicion') == editionId;
+          return sameRelation || sameMovie;
+        },
+        orElse: () => const <String, dynamic>{},
+      );
+      relationId = _readString(relation, 'idPeliculaEdicion');
+      movieId = _readString(relation, 'idPelicula');
+    }
+
+    if (relationId.isEmpty || movieId.isEmpty) {
+      throw const DatabaseException(
+        'API_PELICULA_EDICION_NO_ENCONTRADA',
+        'No se encontro la relacion de esta pelicula con la edicion actual.',
+      );
+    }
+
+    await _putJson('/api/pelicula-ediciones/$relationId', {
+      'idPeliculaEdicion': relationId,
+      'idPelicula': movieId,
+      'idEdicion': editionId,
+      'estadoFestival': 'Rechazada',
+    });
   }
 
 

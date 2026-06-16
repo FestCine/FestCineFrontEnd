@@ -10,6 +10,8 @@ class AdminMoviesPage extends StatefulWidget {
 
     required this.editionId,
 
+    required this.movieOptions,
+
     required this.genres,
 
     required this.directors,
@@ -20,6 +22,8 @@ class AdminMoviesPage extends StatefulWidget {
 
     required this.onDelete,
 
+    required this.onRefresh,
+
   });
 
 
@@ -27,6 +31,8 @@ class AdminMoviesPage extends StatefulWidget {
   final List<Movie> movies;
 
   final String editionId;
+
+  final List<MovieOption> movieOptions;
 
   final List<GenreOption> genres;
 
@@ -37,6 +43,8 @@ class AdminMoviesPage extends StatefulWidget {
   final ValueChanged<Movie> onAdd;
 
   final ValueChanged<Movie> onDelete;
+
+  final Future<void> Function() onRefresh;
 
 
 
@@ -81,6 +89,12 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
   bool messageIsError = false;
 
   bool saving = false;
+
+  bool creatingNewMovie = true;
+
+  bool addToCurrentCartelera = true;
+
+  String? selectedExistingMovieId;
 
 
 
@@ -134,6 +148,10 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
     }
 
+    if (!widget.movieOptions.any((item) => item.id == selectedExistingMovieId)) {
+      selectedExistingMovieId = null;
+    }
+
   }
 
 
@@ -176,7 +194,7 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
           'Gestion de peliculas',
 
-          'Administrador: agrega estrenos, sube portada por URL y borra peliculas de cartelera',
+          'Administrador: agrega estrenos, sube portada por URL y retira peliculas de cartelera',
 
         ),
 
@@ -258,13 +276,42 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
     return CardBox(
 
-      title: 'Nueva pelicula / estreno',
+      title: creatingNewMovie ? 'Nueva pelicula / estreno' : 'Agregar existente',
 
-      subtitle: 'Completa los datos que se veran en cartelera',
+      subtitle: creatingNewMovie
+          ? 'Completa los datos que se veran en cartelera'
+          : 'Selecciona una pelicula registrada para la edicion actual',
 
       child: Column(
 
         children: [
+
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(
+                value: true,
+                label: Text('Nueva pelicula'),
+                icon: Icon(Icons.add),
+              ),
+              ButtonSegment(
+                value: false,
+                label: Text('Agregar existente'),
+                icon: Icon(Icons.playlist_add),
+              ),
+            ],
+            selected: {creatingNewMovie},
+            onSelectionChanged: saving
+                ? null
+                : (value) => setState(() {
+                      creatingNewMovie = value.first;
+                      message = null;
+                      messageIsError = false;
+                    }),
+          ),
+
+          const SizedBox(height: 12),
+
+          if (creatingNewMovie) ...[
 
           ClipRRect(
 
@@ -478,6 +525,20 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
           const SizedBox(height: 14),
 
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: addToCurrentCartelera,
+            onChanged: saving
+                ? null
+                : (value) => setState(
+                      () => addToCurrentCartelera = value ?? true,
+                    ),
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Añadir a cartelera de la edición actual'),
+          ),
+
+          const SizedBox(height: 6),
+
           Wrap(
 
             spacing: 10,
@@ -522,12 +583,65 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
           ),
 
+          ] else
+
+            _existingMovieForm(),
+
         ],
 
       ),
 
     );
 
+  }
+
+
+
+  Widget _existingMovieForm() {
+    final sortedOptions = [...widget.movieOptions]
+      ..sort((a, b) => a.title.compareTo(b.title));
+    final selectedExists =
+        sortedOptions.any((item) => item.id == selectedExistingMovieId);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: selectedExists ? selectedExistingMovieId : null,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Pelicula existente',
+          ),
+          items: sortedOptions
+              .map(
+                (item) => DropdownMenuItem(
+                  value: item.id,
+                  child: Text(
+                    item.year == 0 ? item.title : '${item.title} (${item.year})',
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: saving
+              ? null
+              : (value) => setState(() => selectedExistingMovieId = value),
+        ),
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: saving || selectedExistingMovieId == null
+              ? null
+              : _addExistingMovieToCartelera,
+          icon: saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.playlist_add),
+          label: Text(saving ? 'Guardando...' : 'Añadir a cartelera'),
+        ),
+      ],
+    );
   }
 
 
@@ -896,13 +1010,9 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
                   IconButton(
 
-                    tooltip: 'Borrar de cartelera',
+                    tooltip: 'Retirar de cartelera',
 
-                    onPressed: widget.movies.length == 1
-
-                        ? null
-
-                        : () => _confirmDelete(movie),
+                    onPressed: saving ? null : () => _confirmDelete(movie),
 
                     icon: const Icon(Icons.delete_outline, color: red),
 
@@ -1032,21 +1142,27 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
           director: selectedDirector,
 
+          addToCartelera: addToCurrentCartelera,
+
         ),
 
       );
 
 
 
-      widget.onAdd(newMovie);
+      if (addToCurrentCartelera) {
+        widget.onAdd(newMovie);
+      }
+      await widget.onRefresh();
+      if (!mounted) return;
 
       setState(() {
 
         saving = false;
 
-        message =
-
-            '"$cleanTitle" fue agregada a cartelera y guardada en la base de datos.';
+        message = addToCurrentCartelera
+            ? 'Película creada y añadida a cartelera. Para vender entradas, programa una proyección en Control de Agenda.'
+            : 'Película creada correctamente. No fue añadida a cartelera.';
 
         messageIsError = false;
 
@@ -1065,6 +1181,8 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
             availableDirectors.isEmpty ? '' : availableDirectors.first.id;
 
         selectedFormat = projectionFormatOptions.first;
+
+        addToCurrentCartelera = true;
 
         _randomPoster();
 
@@ -1086,6 +1204,42 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
   }
 
+  Future<void> _addExistingMovieToCartelera() async {
+    final movieId = selectedExistingMovieId;
+    if (movieId == null) return;
+    final selectedMovie = widget.movieOptions.firstWhere(
+      (item) => item.id == movieId,
+      orElse: () => const MovieOption('', '', 0),
+    );
+    if (selectedMovie.id.isEmpty) return;
+
+    setState(() {
+      saving = true;
+      message = 'Guardando cartelera en el backend...';
+      messageIsError = false;
+    });
+
+    try {
+      final result = await DatabaseGateway.addExistingMovieToCartelera(
+        movie: selectedMovie,
+        editionId: widget.editionId,
+      );
+      await widget.onRefresh();
+      if (!mounted) return;
+      setState(() {
+        saving = false;
+        message = result;
+        messageIsError = false;
+      });
+    } on DatabaseException catch (error) {
+      setState(() {
+        saving = false;
+        message = error.friendlyMessage;
+        messageIsError = true;
+      });
+    }
+  }
+
 
 
   Future<void> _confirmDelete(Movie movie) async {
@@ -1096,11 +1250,11 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
       builder: (context) => AlertDialog(
 
-        title: const Text('Borrar pelicula'),
+        title: const Text('Retirar de cartelera'),
 
         content: Text(
 
-          'Estas seguro de borrar "${movie.title}" de la cartelera?',
+          'Estas seguro de retirar "${movie.title}" de la cartelera?',
 
         ),
 
@@ -1120,7 +1274,7 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
             icon: const Icon(Icons.delete_outline),
 
-            label: const Text('Borrar'),
+            label: const Text('Retirar'),
 
           ),
 
@@ -1134,13 +1288,36 @@ class _AdminMoviesPageState extends State<AdminMoviesPage> {
 
     if (confirmed != true) return;
 
-    widget.onDelete(movie);
-
     setState(() {
 
-      message = '"${movie.title}" fue retirada de cartelera.';
+      saving = true;
+
+      message = 'Retirando pelicula de cartelera...';
+
+      messageIsError = false;
 
     });
+
+    try {
+      await DatabaseGateway.retireMovieFromCartelera(
+        movie: movie,
+        editionId: widget.editionId,
+      );
+      widget.onDelete(movie);
+      await widget.onRefresh();
+      if (!mounted) return;
+      setState(() {
+        saving = false;
+        message = 'Película retirada de cartelera correctamente.';
+        messageIsError = false;
+      });
+    } on DatabaseException catch (error) {
+      setState(() {
+        saving = false;
+        message = error.friendlyMessage;
+        messageIsError = true;
+      });
+    }
 
   }
 

@@ -201,6 +201,11 @@ String _estadoToGenre(String estado) {
   return estado.isEmpty ? 'Catalogo' : estado;
 }
 
+bool _isCarteleraStatus(String estado) {
+  final normalized = normalizeText(estado);
+  return normalized == 'seleccionada' || normalized == 'premiada';
+}
+
 Attendee attendeeFromJson(Map<String, dynamic> item) {
   final fullNameFromApi = _readString(item, 'nombreCompleto');
   final rawFirstName = _readString(item, 'nombre');

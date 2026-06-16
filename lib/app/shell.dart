@@ -91,11 +91,13 @@ class _ShellState extends State<Shell> {
       Module.peliculas => AdminMoviesPage(
         movies: moviesCatalog,
         editionId: selectedEdition.id,
+        movieOptions: movieOptions,
         genres: genreOptions,
         directors: directorOptions,
         people: people,
         onAdd: _addMovie,
         onDelete: _deleteMovie,
+        onRefresh: () => _selectEdition(selectedEdition),
       ),
       Module.ediciones => AdminEditionsPage(
         venues: venues,

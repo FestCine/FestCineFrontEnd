@@ -30,6 +30,8 @@ class Movie {
 
     this.format = '',
 
+    this.status = '',
+
   });
 
   final String title;
@@ -55,6 +57,8 @@ class Movie {
   final String director;
 
   final String format;
+
+  final String status;
 
 }
 
@@ -532,7 +536,13 @@ class VenueOption {
 
 class MovieOption {
 
-  const MovieOption(this.id, this.title, this.year);
+  const MovieOption(
+    this.id,
+    this.title,
+    this.year, {
+    this.idPeliculaEdicion = '',
+    this.status = '',
+  });
 
 
 
@@ -541,6 +551,10 @@ class MovieOption {
   final String title;
 
   final int year;
+
+  final String idPeliculaEdicion;
+
+  final String status;
 
 }
 
@@ -654,6 +668,8 @@ class MovieDraft {
 
     required this.director,
 
+    this.addToCartelera = true,
+
   });
 
 
@@ -679,6 +695,8 @@ class MovieDraft {
   final List<GenreOption> genres;
 
   final DirectorOption director;
+
+  final bool addToCartelera;
 
 }
 
